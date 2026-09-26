@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.vercel/
+coverage/
+.DS_Store
+*.log
+bun.lock
+bun.lockb
+.env*
+!.env.example

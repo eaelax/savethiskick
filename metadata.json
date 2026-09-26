@@ -1,0 +1,6 @@
+{
+  "name": "SaveThisKick - Kick VOD & Clip Downloader",
+  "description": "Fast and free online tool to download Kick VODs and clips in 1080p60, 720p, or MP3 with anonymous browsing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

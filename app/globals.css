@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    /* Google Fonts: Rubik (Latin) & Almarai (Arabic) */
+    --font-rubik: 'Rubik', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-almarai: 'Almarai', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+    /* Light Theme (Inverted: Pure white page body, soft gray cards #F1F5F9 with crisp #E2E8F0 borders) */
+    --bg-main: #FFFFFF;
+    --bg-canvas: #FFFFFF;
+    --bg-surface: #F1F5F9;
+    --bg-subtle: #E2E8F0;
+    --bg-input: #FFFFFF;
+    --border-color: #E2E8F0;
+    --border-hover: #CBD5E1;
+    --border-focus: #53FC18;
+    --text-primary: #0F172A;
+    --text-secondary: #334155;
+    --text-muted: #64748B;
+    
+    /* Official Kick Neon Green (#53FC18) */
+    --kick-green: #53FC18;
+    --kick-neon: #53FC18;
+    --brand-text: #53FC18;
+    --brand-badge-bg: rgba(83, 252, 24, 0.16);
+    --brand-badge-text: #000000;
+    --brand-badge-border: rgba(83, 252, 24, 0.45);
+    
+    /* Buttons */
+    --btn-primary-bg: #53FC18;
+    --btn-primary-text: #000000;
+    --btn-accent-bg: #53FC18;
+    --btn-accent-text: #000000;
+    --btn-accent-hover: #45e30f;
+    
+    /* Crisp visible shadows for Light mode */
+    --card-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -2px rgba(15, 23, 42, 0.04);
+    --input-shadow: 0 2px 8px -1px rgba(15, 23, 42, 0.06);
+    --accent-glow: rgba(83, 252, 24, 0.35);
+  }
+
+  .dark {
+    /* Dark Theme (Deep sleek charcoal/black) */
+    --bg-main: #0B0E0F;
+    --bg-canvas: #0B0E0F;
+    --bg-surface: #181D20;
+    --bg-subtle: #1F262A;
+    --bg-input: #121619;
+    --border-color: #262C30;
+    --border-hover: #373F45;
+    --border-focus: #53FC18;
+    --text-primary: #F5F5F5;
+    --text-secondary: #9EAEB8;
+    --text-muted: #687782;
+    
+    /* Official Kick Neon Green (#53FC18) */
+    --kick-green: #53FC18;
+    --kick-neon: #53FC18;
+    --brand-text: #53FC18;
+    --brand-badge-bg: rgba(83, 252, 24, 0.14);
+    --brand-badge-text: #53FC18;
+    --brand-badge-border: rgba(83, 252, 24, 0.35);
+    
+    /* Buttons */
+    --btn-primary-bg: #53FC18;
+    --btn-primary-text: #000000;
+    --btn-accent-bg: #53FC18;
+    --btn-accent-text: #000000;
+    --btn-accent-hover: #45e30f;
+    
+    /* Shadows */
+    --card-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 2px 8px -2px rgba(0, 0, 0, 0.3);
+    --input-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.4);
+    --accent-glow: rgba(83, 252, 24, 0.25);
+  }
+}
+
+body {
+  font-family: var(--font-rubik);
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  min-height: 100vh;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Dynamic Arabic Font Switcher */
+[dir="rtl"], html[lang="ar"], body.font-almarai, .font-almarai {
+  font-family: var(--font-almarai) !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+}
