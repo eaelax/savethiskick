@@ -3,6 +3,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { normalizeKickUrl, parseKickTarget } from '@/lib/utils';
 
+export const runtime = 'edge';
+
 const execAsync = promisify(exec);
 
 export interface KickMediaInfo {
