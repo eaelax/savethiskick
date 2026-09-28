@@ -3,8 +3,6 @@ import { normalizeKickUrl, parseKickTarget, formatDuration } from '@/lib/utils';
 
 export const runtime = 'edge';
 
-const execAsync = promisify(exec);
-
 export interface KickMediaInfo {
   id: string;
   type: 'vod' | 'clip' | 'live';
@@ -40,40 +38,17 @@ export interface KickMediaInfo {
   };
 }
 
-function formatDuration(sec: number): string {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  if (h > 0) {
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  }
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
 const COMMON_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
   Referer: 'https://kick.com/',
   Origin: 'https://kick.com',
   Accept: 'application/json, text/plain, */*',
 };
 
-// Robust Kick data fetcher using curl with browser TLS fingerprints + worker fallback
+// Robust Kick data fetcher using edge-native fetch + worker fallback
 async function fetchKickApi<T = any>(apiUrl: string): Promise<T | null> {
-  // 1. Fast curl via child_process (most reliable against Cloudflare TLS fingerprint checks)
-  try {
-    const escapedUrl = apiUrl.replace(/"/g, '\\"');
-    const { stdout } = await execAsync(
-      `curl -s -m 6 -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" -H "Referer: https://kick.com/" -H "Origin: https://kick.com" "${escapedUrl}"`
-    );
-    if (stdout && (stdout.trim().startsWith('{') || stdout.trim().startsWith('['))) {
-      const parsed = JSON.parse(stdout);
-      if (parsed && !parsed.error && parsed.message !== 'Clip not found') {
-        return parsed as T;
-      }
-    }
-  } catch {}
-
-  // 2. Direct fetch fallback
+  // 1. Direct fetch with browser headers
   try {
     const res = await fetch(apiUrl, {
       headers: COMMON_HEADERS,
@@ -88,7 +63,7 @@ async function fetchKickApi<T = any>(apiUrl: string): Promise<T | null> {
     }
   } catch {}
 
-  // 3. Fallback worker proxy
+  // 2. Fallback worker proxy
   try {
     const proxyUrl = 'https://cors.viddastrage.workers.dev/corsproxy/?apiurl=' + encodeURIComponent(apiUrl);
     const res = await fetch(proxyUrl, {
@@ -106,18 +81,8 @@ async function fetchKickApi<T = any>(apiUrl: string): Promise<T | null> {
   return null;
 }
 
-// Fallback yt-dlp extractor when direct API is unavailable
-async function extractWithYtDlp(url: string): Promise<any | null> {
-  try {
-    const escaped = url.replace(/"/g, '\\"');
-    const { stdout } = await execAsync(
-      `yt-dlp -j --no-playlist --socket-timeout 7 "${escaped}"`,
-      { maxBuffer: 10 * 1024 * 1024 }
-    );
-    if (stdout && stdout.trim().startsWith('{')) {
-      return JSON.parse(stdout.trim());
-    }
-  } catch {}
+// Fallback extractor stub for edge runtime
+async function extractWithYtDlp(_url: string): Promise<any | null> {
   return null;
 }
 
@@ -146,21 +111,23 @@ async function fetchKickVodFromPage(channelSlug: string | undefined, videoId: st
     : `https://kick.com/video/${videoId}`;
 
   let html = '';
-  // 1. Fetch via curl with browser headers (bypasses Cloudflare bot detection)
+  // 1. Direct fetch with browser headers
   try {
-    const escapedUrl = targetUrl.replace(/"/g, '\\"');
-    const { stdout } = await execAsync(
-      `curl -s -L -m 8 -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" -H "Referer: https://kick.com/" -H "Origin: https://kick.com" "${escapedUrl}"`
-    );
-    html = stdout || '';
+    const res = await fetch(targetUrl, {
+      headers: COMMON_HEADERS,
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.ok) {
+      html = await res.text();
+    }
   } catch {}
 
-  // 2. Fetch fallback
+  // 2. Fallback proxy fetch if direct connection is blocked
   if (!html || html.length < 500) {
     try {
-      const res = await fetch(targetUrl, {
-        headers: COMMON_HEADERS,
-        signal: AbortSignal.timeout(6000),
+      const proxyUrl = 'https://cors.viddastrage.workers.dev/corsproxy/?apiurl=' + encodeURIComponent(targetUrl);
+      const res = await fetch(proxyUrl, {
+        signal: AbortSignal.timeout(7000),
       });
       if (res.ok) {
         html = await res.text();
@@ -204,14 +171,17 @@ async function fetchKickVodFromPage(channelSlug: string | undefined, videoId: st
 
   // Duration
   const durMatch = html.match(/"duration\\*":\\*([0-9]+)/) || html.match(/"duration":([0-9]+)/);
-  const durationSec = durMatch ? parseInt(durMatch[1], 10) : 3600;
+  const rawDur = durMatch ? parseInt(durMatch[1], 10) : 0;
+  const durationSec = rawDur > 100000 ? Math.round(rawDur / 1000) : (rawDur || 3600);
 
   // Thumbnail
   const thumbMatch =
     html.match(/"thumbnail\\*":\\*\{\\*"(?:src|url)\\*":\\*"([^"\\]+)/) ||
     html.match(/"thumbnail":\{"(?:src|url)":"([^"]+)/) ||
     html.match(/property="og:image"\s+content="([^"]+)"/i);
-  const thumbnail = thumbMatch ? thumbMatch[1].replace(/\\\//g, '/') : 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1280&auto=format&fit=crop&q=85';
+  const thumbnail = thumbMatch
+    ? thumbMatch[1].replace(/\\\//g, '/')
+    : 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1280&auto=format&fit=crop&q=85';
 
   // Title
   const titleMatch =
@@ -227,13 +197,17 @@ async function fetchKickVodFromPage(channelSlug: string | undefined, videoId: st
   const userMatch =
     html.match(/id="channel-username"[^>]*>([^<]+)/) ||
     html.match(/"username\\*":\\*"([^"\\]+)/);
-  const displayName = userMatch ? userMatch[1].trim() : (channelSlug ? (channelSlug.charAt(0).toUpperCase() + channelSlug.slice(1)) : 'streamer');
+  const displayName = userMatch
+    ? userMatch[1].trim()
+    : (channelSlug ? (channelSlug.charAt(0).toUpperCase() + channelSlug.slice(1)) : 'streamer');
   const username = channelSlug || displayName.toLowerCase();
 
   const avatarMatch =
     html.match(/id="channel-avatar"[^>]*src="([^"]+)"/) ||
     html.match(/src="([^"]+)"[^>]*id="channel-avatar"/);
-  const avatarUrl = avatarMatch ? avatarMatch[1] : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=160&auto=format&fit=crop&q=80';
+  const avatarUrl = avatarMatch
+    ? avatarMatch[1]
+    : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=160&auto=format&fit=crop&q=80';
 
   const verified = html.includes('VerifiedBadge');
 
@@ -308,7 +282,6 @@ async function buildStreamQualitiesAndAudio(sourceStreamUrl: string, durationSec
               const label = `${height}p${fps > 30 ? fps : ''}${isHighest ? ' (Source HD)' : ''}`.trim();
               const estimatedSizeMb = Math.max(1, Math.round((safeDuration * bandwidth) / (8 * 1024 * 1024)));
 
-              // Avoid duplicate resolutions
               if (!parsedQualities.some((q) => q.resolution === resolution)) {
                 parsedQualities.push({
                   label,
@@ -397,8 +370,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Please enter a valid Kick URL or username.' }, { status: 400 });
     }
 
-    // Parse the input into a structured target:
-    // Checks for specific video/clip IDs FIRST before considering channel fallback.
     const target = parseKickTarget(rawUrl);
 
     if (!target) {
@@ -411,17 +382,12 @@ export async function POST(req: NextRequest) {
     const cleanUrl = normalizeKickUrl(rawUrl);
 
     // =========================================================================
-    // CASE 1A: SPECIFIC VOD OR VIDEO URL (Target That Exact Video)
-    // Patterns:
-    //  - kick.com/{channel}/videos/{video_id}
-    //  - kick.com/video/{video_id}
-    //  - Direct video UUID or ID
+    // CASE 1A: SPECIFIC VOD OR VIDEO URL
     // =========================================================================
     if (target.type === 'vod' && target.videoId) {
       const videoId = target.videoId;
       const channelSlug = target.channelSlug;
 
-      // 1. Fetch exact video page (via SSR HTML parsing - modern Kick VOD architecture)
       const scrapedVod = await fetchKickVodFromPage(channelSlug, videoId);
 
       if (scrapedVod) {
@@ -476,15 +442,12 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 2. Fallback: Fetch exact video resource from Kick API endpoint (/api/v1/video/{video_id})
       let videoData: any = await fetchKickApi(`https://kick.com/api/v1/video/${videoId}`);
 
-      // Check if Kick API returned model not found or error
       if (videoData && (videoData.message?.includes('No query results for model') || videoData.message === 'Video not found')) {
         videoData = null;
       }
 
-      // Check for private / deleted / sub-only status on direct video response
       if (videoData) {
         if (videoData.deleted_at) {
           return NextResponse.json(
@@ -506,12 +469,10 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 3. Fallback: If exact video not resolved directly (and channel is known), search THAT EXACT video in channel videos
       if ((!videoData || !videoData.source) && channelSlug) {
         const v2ChannelVideos = await fetchKickApi<any[]>(`https://kick.com/api/v2/channels/${channelSlug}/videos`);
         if (Array.isArray(v2ChannelVideos) && v2ChannelVideos.length > 0) {
           const targetLower = videoId.toLowerCase();
-          // Find the exact video matching the ID/UUID or slug from the user's URL
           const exactMatch = v2ChannelVideos.find((v: any) => {
             const vUuid = v.video?.uuid?.toLowerCase();
             const vId = String(v.id);
@@ -531,7 +492,6 @@ export async function POST(req: NextRequest) {
           });
 
           if (exactMatch) {
-            // Check for deletion/private status on exact match
             if (exactMatch.video?.deleted_at) {
               return NextResponse.json(
                 { error: 'This Kick VOD has been deleted by the broadcaster.' },
@@ -567,7 +527,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 4. If exact video found via Kick API:
       if (videoData && (videoData.source || videoData.livestream || videoData.session_title)) {
         const ls = videoData.livestream;
         const channelObj = ls?.channel || videoData.channel;
@@ -613,7 +572,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, media });
       }
 
-      // 5. CRITICAL: Exact VOD not found. DO NOT fall back to channel's latest video!
       return NextResponse.json(
         {
           error: `The requested Kick VOD (${videoId}) could not be found. It may have expired (Kick deletes VODs after 30 to 60 days), been set to private, or deleted by the broadcaster.`,
@@ -623,12 +581,7 @@ export async function POST(req: NextRequest) {
     }
 
     // =========================================================================
-    // CASE 1B: SPECIFIC CLIP URL (Target That Exact Clip)
-    // Patterns:
-    //  - kick.com/{channel}?clip={clip_id}
-    //  - kick.com/clips/{clip_id} or kick.com/clip/{clip_id}
-    //  - Direct clip ID (e.g. clip_01H811...)
-    // CRITICAL: Must resolve THAT EXACT clip. Do NOT fall back to channel latest.
+    // CASE 1B: SPECIFIC CLIP URL
     // =========================================================================
     if (target.type === 'clip' && target.clipId) {
       const clipId = target.clipId;
@@ -671,43 +624,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, media });
       }
 
-      // Try yt-dlp on clip URL fallback
-      const fullClipUrl = target.channelSlug
-        ? `https://kick.com/${target.channelSlug}?clip=${clipId}`
-        : `https://kick.com/clips/${clipId}`;
-      const ytdlClip = await extractWithYtDlp(fullClipUrl);
-      if (ytdlClip && (ytdlClip.url || ytdlClip.manifest_url)) {
-        const durationSec = Math.max(5, Math.round(Number(ytdlClip.duration || 30)));
-        const streamerUsername = ytdlClip.channel || target.channelSlug || 'streamer';
-        const streamerDisplayName = ytdlClip.uploader || streamerUsername;
-        const streamSrc = ytdlClip.url || ytdlClip.manifest_url || '';
-        const { qualities, audioOnly } = await buildStreamQualitiesAndAudio(streamSrc, durationSec);
-
-        const media: KickMediaInfo = {
-          id: clipId,
-          type: 'clip',
-          title: ytdlClip.title || `${streamerDisplayName} Viral Clip`,
-          category: 'Clip Highlight',
-          views: ytdlClip.view_count ? `${Number(ytdlClip.view_count).toLocaleString()} views` : undefined,
-          streamer: {
-            username: streamerUsername,
-            displayName: streamerDisplayName,
-            avatarUrl: ytdlClip.thumbnail || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=160&auto=format&fit=crop&q=80',
-            verified: true,
-          },
-          durationSeconds: durationSec,
-          durationFormatted: formatDuration(durationSec),
-          thumbnailUrl: ytdlClip.thumbnail || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=1280&auto=format&fit=crop&q=85',
-          createdAt: ytdlClip.upload_date || new Date().toISOString(),
-          sourceUrl: cleanUrl,
-          isLatestFromChannel: false,
-          qualities,
-          audioOnly,
-        };
-
-        return NextResponse.json({ success: true, media });
-      }
-
       return NextResponse.json(
         { error: `The requested clip (ID: ${clipId}) could not be found or has expired.` },
         { status: 404 }
@@ -716,11 +632,6 @@ export async function POST(req: NextRequest) {
 
     // =========================================================================
     // CASE 2: CHANNEL URL OR USERNAME ONLY (Fallback to Latest VOD)
-    // ONLY executed when:
-    //  - User enters a plain username (e.g. @therealpatty or therealpatty)
-    //  - Base channel URL (e.g. kick.com/{channel} or savethiskick.com/{channel})
-    //  - The general videos tab without a specific video ID (e.g. kick.com/{channel}/videos)
-    // Action: Query channel metadata and select most recent past broadcast (previous_livestreams[0]).
     // =========================================================================
     if (target.type === 'channel' && target.channelSlug) {
       const channelSlug = target.channelSlug;
@@ -741,7 +652,6 @@ export async function POST(req: NextRequest) {
         channelData?.user?.username || (channelSlug.charAt(0).toUpperCase() + channelSlug.slice(1));
       const channelVerified = Boolean(channelData?.verified);
 
-      // 1. Select the most recent past broadcast (previous_livestreams[0])
       if (Array.isArray(channelData.previous_livestreams) && channelData.previous_livestreams.length > 0) {
         const latestBroadcast = channelData.previous_livestreams[0];
         const rawDur = latestBroadcast.duration || 0;
@@ -758,18 +668,9 @@ export async function POST(req: NextRequest) {
         let streamSrc = latestBroadcast.source || '';
         const videoUuid = latestBroadcast.video?.uuid;
 
-        // If source not embedded directly on livestream object, fetch via /api/v1/video/{uuid}
         if (!streamSrc && videoUuid) {
           const vDetails = await fetchKickApi(`https://kick.com/api/v1/video/${videoUuid}`);
           streamSrc = vDetails?.source || '';
-        }
-
-        // If stream source still empty, try yt-dlp on the latest video URL
-        if (!streamSrc && videoUuid) {
-          const ytdlLatest = await extractWithYtDlp(`https://kick.com/${channelSlug}/videos/${videoUuid}`);
-          if (ytdlLatest) {
-            streamSrc = ytdlLatest.manifest_url || ytdlLatest.url || '';
-          }
         }
 
         const { qualities, audioOnly } = await buildStreamQualitiesAndAudio(streamSrc, durationSec);
@@ -799,7 +700,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, media });
       }
 
-      // 2. If no past broadcast is listed but channel is currently LIVE
       if (channelData.livestream) {
         const ls = channelData.livestream;
         const rawDur = ls.duration || 0;
@@ -835,7 +735,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, media });
       }
 
-      // Channel has neither past broadcasts nor live stream
       return NextResponse.json(
         {
           error: `Channel '${channelDisplayName}' currently has no public VODs or past broadcasts available for download.`,
