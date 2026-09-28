@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
@@ -13,56 +14,43 @@ export async function GET(req: NextRequest) {
   const rangeHeader = req.headers.get('range');
 
   try {
-    const headers: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-      'Referer': 'https://kick.com/',
-      'Origin': 'https://kick.com',
-    };
-
-    if (rangeHeader) {
-      headers['Range'] = rangeHeader;
-    }
-
     const upstreamRes = await fetch(targetUrl, {
-      headers,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        Referer: 'https://kick.com/',
+        Origin: 'https://kick.com',
+        ...(rangeHeader ? { Range: rangeHeader } : {}),
+      },
       signal: req.signal,
     });
 
-    if (!upstreamRes.ok && upstreamRes.status !== 206) {
-      return NextResponse.json(
-        { error: `Upstream error ${upstreamRes.status}` },
-        { status: upstreamRes.status }
-      );
-    }
+    const headers = new Headers();
+    headers.set('Access-Control-Allow-Origin', '*');
+    headers.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    headers.set('Access-Control-Allow-Headers', 'Range, Content-Type');
+    headers.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
 
-    const responseHeaders = new Headers();
-    responseHeaders.set('Access-Control-Allow-Origin', '*');
-    responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+    const contentType = upstreamRes.headers.get('content-type');
+    const contentLength = upstreamRes.headers.get('content-length');
+    const contentRange = upstreamRes.headers.get('content-range');
+    const acceptRanges = upstreamRes.headers.get('accept-ranges');
 
-    const upstreamContentType = upstreamRes.headers.get('content-type');
-    if (upstreamContentType) {
-      responseHeaders.set('Content-Type', upstreamContentType);
-    }
+    if (contentType) headers.set('Content-Type', contentType);
+    if (contentLength) headers.set('Content-Length', contentLength);
+    if (contentRange) headers.set('Content-Range', contentRange);
+    if (acceptRanges) headers.set('Accept-Ranges', acceptRanges);
 
-    const upstreamContentLength = upstreamRes.headers.get('content-length');
-    if (upstreamContentLength) {
-      responseHeaders.set('Content-Length', upstreamContentLength);
-    }
-
-    const upstreamContentRange = upstreamRes.headers.get('content-range');
-    if (upstreamContentRange) {
-      responseHeaders.set('Content-Range', upstreamContentRange);
-    }
+    headers.set('Cache-Control', 'public, max-age=86400');
 
     return new NextResponse(upstreamRes.body, {
       status: upstreamRes.status,
-      headers: responseHeaders,
+      headers,
     });
   } catch (error: any) {
-    if (error.name === 'AbortError') {
-      return new NextResponse(null, { status: 499 });
-    }
-    return NextResponse.json({ error: 'Proxy request failed: ' + error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Proxy request failed: ' + error.message },
+      { status: 502 }
+    );
   }
 }
