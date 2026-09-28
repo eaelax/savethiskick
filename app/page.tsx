@@ -29,7 +29,6 @@ export default function Home() {
 
   const [legalModalTab, setLegalModalTab] = useState<'privacy' | 'terms' | 'copyright' | null>(null);
 
-  // Hidden admin access keyboard shortcut (Ctrl+Shift+A)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
@@ -53,30 +52,21 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)] selection:bg-[#53fc18] selection:text-[#000000] transition-colors duration-200">
-      {/* Streamlined Header with Logo and Sun/Moon Dual Theme Switcher */}
       <Navbar />
 
-      {/* Main Core Downloader Component */}
       <main className="flex-1">
-        <KickDownloader initialUrl={initialPresetUrl} />
+        <React.Suspense fallback={<div className="w-full max-w-6xl mx-auto px-4 py-12" />}>
+          <KickDownloader initialUrl={initialPresetUrl} />
+        </React.Suspense>
 
-        {/* 2 Ways to Download (Copy & Paste + Magic "savethis" Prefix) */}
         <HowToSection onTryPreset={handleSelectToolPreset} />
-
-        {/* Compact, Slim VOD & Clip Features Grid */}
         <ProgrammaticSeoSection onSelectTool={handleSelectToolPreset} />
-
-        {/* Technical Specifications & pSEO Keyword Hub */}
         <SeoKeywordsHub />
-
-        {/* Redesigned Modern FAQ Section */}
         <FaqSection />
       </main>
 
-      {/* Clean Footer with Privacy & Legal Links */}
       <Footer onOpenLegal={(tab) => setLegalModalTab(tab)} />
 
-      {/* Hidden Admin Dashboard (Internal only, Ctrl+Shift+A) */}
       {isAdminOpen && (
         <AdminDashboard
           isOpen={isAdminOpen}
@@ -84,7 +74,6 @@ export default function Home() {
         />
       )}
 
-      {/* Legal & Privacy Compliance Modal */}
       <LegalModal
         isOpen={legalModalTab !== null}
         initialTab={legalModalTab || 'privacy'}
